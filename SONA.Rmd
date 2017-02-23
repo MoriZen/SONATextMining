@@ -5,14 +5,135 @@ date: "22 February 2017"
 output: html_document
 ---
 
+## Set up the data frame for the 2017 and 2016 SONA speeches
+
+I've used the freely availble speech text from www.gov.za/speeches, printed it as a pdf and then converted it to text using the package **pdftools**. 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(pdftools)
-setwd("~/R/SONATextMining/Data_raw")
-files <- list.files(pattern = "pdf$")
+library(tm)
+library(dplyr)
+library(tidytext)
+library(ggplot2)
+library(stringr)
+library(scales)
 
-addresses <- lapply("~/R/SONATextMining/Data_raw/SONA2017.pdf", pdf_text)
+files <- list.files(path = "~/R/SONATextMining/Data_raw",
+                    pattern = "pdf$", 
+                    full.names = TRUE)
 
+addresses <- lapply(files, pdf_text)
+addresses_clean <- lapply(addresses, removeNumbers)
+
+
+
+```
+The first step in the analysis is to convert the lines of text into a tidy data frame of only words. I have used the **tidytext** package and the **unnest_tokens** function to do so. I further removed stop words and created a word count which will be used to create a graph of the most common words.
+```{r convertToTokens, echo = FALSE}
+text1_df <- data_frame(page = 1:17, text = addresses_clean[[2]])
+
+tidySONA17 <- text1_df %>% 
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words) %>% 
+  count(word, sort = TRUE)
+
+text2_df <- data_frame(page = 1:15, text = addresses_clean[[1]])
+
+tidySONA16 <- text2_df %>% 
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words) %>% 
+  count(word, sort = TRUE)
+```
+```{r commonWordPlot, echo = FALSE}
+tidySONA17 %>% 
+  filter(n > 10) %>% 
+  mutate(word = reorder(word,n)) %>% 
+  ggplot(
+    aes(word, n)
+  ) +
+  geom_bar(stat = "identity") +
+  xlab(NULL) + 
+  coord_flip()
+
+tidySONA16 %>% 
+  filter(n > 10) %>% 
+  mutate(word = reorder(word,n)) %>% 
+  ggplot(
+    aes(word, n)
+  ) +
+  geom_bar(stat = "identity") +
+  xlab(NULL) + 
+  coord_flip()
+```
+
+
+Next let us check for common words between the two speeches:
+
+```{r compareSpeeches}
+SONA17_percent <- tidySONA17 %>% 
+  #mutate(word = str_extract(word, "[a-z']+")) %>% 
+  transmute(word, sona17 = n / sum(n))
+
+frequency <- tidySONA16 %>% 
+  #mutate(word = str_extract(word, "[a-z']+")) %>% 
+  transmute(word, sona16 = n / sum(n)) %>%
+  left_join(SONA17_percent) %>% 
+  ungroup()
+
+ggplot(frequency, 
+       aes(x = sona16, 
+           y = sona17, 
+           color = abs(sona17 - sona16)
+           )
+       ) +
+  geom_jitter(alpha = 0.1, 
+              size = 2.5, 
+              width = 0.3, 
+              height = 0.3
+              ) +
+  geom_text(
+    aes(label = word),
+    check_overlap = TRUE,
+    vjust = 1.5
+    ) +
+  scale_x_log10(
+    labels = percent_format()
+    ) +
+  scale_y_log10(
+    labels = percent_format()
+    ) +
+  scale_color_gradient(
+    limits = c(0, 0.001), 
+    low = "darkslategray4", 
+    high = "gray75"
+    ) +
+  theme(legend.position = "none") +
+  labs(y = "SONA17", x = "SONA16")
+  
+  
+```
+
+
+How correlated are these two speeches? We see a 95% confidence interval of 0.72 to 0.79 for the correlation with a sample estimate of 0.76 (rounded to two decimal points). It certainly makes sense that speeches by the same president, only a  year apart, would share a lot of the same content.
+
+```{r}
+cor.test(data = frequency, 
+         ~ sona16 + sona17)
+```
+
+On to some sentiment analysis
+
+```{r}
+nrc <- get_sentiments("nrc")
+
+sentimentSONA17 <- tidySONA17 %>% 
+  inner_join(get_sentiments("bing")) %>% 
+  count(word, sentiment, sort = TRUE) %>% 
+  ungroup()
+  
+
+ sentimentSONA16 <- tidySONA16 %>% 
+  inner_join(nrc)
 ```
 
 ## R Markdown
